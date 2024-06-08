@@ -22,7 +22,7 @@
 
 ## Fractal dimension computation
 
--
+- **fd.py**: it computes the fractal dimension
 
 ## Spatial augmentation
 
