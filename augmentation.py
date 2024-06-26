@@ -10,49 +10,27 @@ import random
 # Ignore all warnings
 warnings.filterwarnings("ignore")
 
-def remove_geometry(file, query_mbr):
+
+
+
+def remove_geometry(df, query_mbr):
     """
-    Removes a single geometry from the specified dataset file that falls outside the
-    provided query MBR (Minimum Bounding Rectangle).
+    Removes a single geometry from the DataFrame that falls outside the provided query MBR 
+    (Minimum Bounding Rectangle).
 
     Args:
-        file (file object): File object to the file containing geometries.
+        df (DataFrame): DataFrame containing geometries.
         query_mbr (tuple[float, float, float, float]): Coordinates of the query MBR
             as (xmin, ymin, xmax, ymax).
 
     Returns:
-        bool: True if a geometry was removed, False otherwise.
+        DataFrame: DataFrame with one geometry removed.
     """
-    geometry_removed = False
-
-    # Store the current position of the file pointer
-    current_position = file.tell()
-
-    # Read lines until a geometry outside the query MBR is found
-    while True:
-        # Read the next line
-        line = file.readline()
-        if not line:
-            # End of file reached
-            break
-
-        # Parse the geometry coordinates
-        xmin, ymin, xmax, ymax = map(float, line.strip().split(','))
-
-        # Check if the geometry falls within the query MBR
-        if not mbr_overlaps(query_mbr, (xmin, ymin, xmax, ymax)):
-            # Seek back to the start of the line
-            file.seek(current_position)
-            # Truncate the file from the current position to remove the line
-            file.truncate()
-            # Geometry removed, exit the loop
-            geometry_removed = True
-            break
-
-        # Update the current position to the start of the next line
-        current_position = file.tell()
-
-    return geometry_removed
+    xmin, ymin, xmax, ymax = query_mbr
+    mask = (df['xmin'] >= xmin) & (df['ymin'] >= ymin) & (df['xmax'] <= xmax) & (df['ymax'] <= ymax)
+    index_to_remove = df[mask].sample(n=1).index
+    df_filtered = df.drop(index_to_remove)
+    return df_filtered
 
 def mbr_overlaps(mbr1, mbr2):
     """
@@ -73,22 +51,77 @@ def mbr_overlaps(mbr1, mbr2):
 
 
 def generate_random_box(mbr_dataset, w, h):
+    xmin_d, ymin_d, xmax_d, ymax_d = mbr_dataset.iloc[0]
 
-  xmin_d, ymin_d, xmax_d, ymax_d = mbr_dataset.iloc[0]
-  # print(xmin_d, ymin_d, xmax_d, ymax_d)
+    box_width = float(w)
+    box_height = float(h)
 
-  box_width = float(w)
-  box_height = float(h)
+    # Logging
+    
+    test = 30
+    while test>0:
+        test = test -1
+        xmin = random.uniform(xmin_d, xmax_d - box_width)
+        ymin = random.uniform(ymin_d, ymax_d - box_height)
 
-  while True:
-    xmin = random.uniform(xmin_d, xmax_d - box_width)
-    ymin = random.uniform(ymin_d, ymax_d - box_height)
+        xmax = xmin + box_width
+        ymax = ymin + box_height
 
-    xmax = xmin + box_width
-    ymax = ymin + box_height
+        
 
-    if xmax <= xmax_d and xmin >= xmin_d and ymax <= ymax_d and ymin >= ymin_d:
-      return xmin, ymin, xmax, ymax
+        if xmax <= xmax_d and xmin >= xmin_d and ymax <= ymax_d and ymin >= ymin_d:
+            # Logging
+            print("Generated box:", xmin, ymin, xmax, ymax)
+            return xmin, ymin, xmax, ymax
+    return 0
+
+def generate_random_box_no_index(mbr_dataset, w, h, query_mbr):
+    xmin_d, ymin_d, xmax_d, ymax_d = mbr_dataset
+
+    box_width = float(w)
+    box_height = float(h)
+
+    minX_q, minY_q, maxX_q, maxY_q = query_mbr
+
+    # Logging
+    #print("Dataset MBR dimensions:", xmin_d, ymin_d, xmax_d, ymax_d)
+    #print("Box dimensions:", box_width, box_height)
+    
+    test = 30
+    while test > 0:
+        test -= 1
+        xmin = random.uniform(xmin_d, xmax_d - box_width)
+        ymin = random.uniform(ymin_d, ymax_d - box_height)
+
+        xmax = xmin + box_width
+        ymax = ymin + box_height
+
+        if xmax <= xmax_d and xmin >= xmin_d and ymax <= ymax_d and ymin >= ymin_d:
+            if xmax <= minX_q or xmin >= maxX_q or ymax <= minY_q or ymin >= maxY_q:
+                # Logging
+                # print("Generated box outside query MBR:", xmin, ymin, xmax, ymax)
+                return xmin, ymin, xmax, ymax
+
+    print("Failed to generate a valid box after 30 attempts")
+    return 0
+
+def generate_boxes_and_write(output_path, coordinates_summary, b, h, coordinates_rq, num_boxes):
+    generated_boxes = []
+    count_geom_tot = 0
+
+    for _ in range(num_boxes):
+        new_box = generate_random_box_no_index(coordinates_summary, b, h, coordinates_rq)
+        if new_box != 0:
+            generated_boxes.append(new_box)
+            count_geom_tot += 1
+
+    if generated_boxes:
+        with open(output_path, 'a') as file:  # 'a' mode to append to the file
+            for box in generated_boxes:
+                file.write(','.join(map(str, box)) + '\n')
+    
+    print(f"Total geometries added: {count_geom_tot}")
+    return count_geom_tot
 
 def remove_distribution_column(file_path):
     # Read the CSV file into a DataFrame with explicit delimiter (semicolon)
@@ -209,7 +242,7 @@ def generate_random_degree():
     return degree
 
 def rotate_dataset(dataset_name, output_csv, angle_degrees):
-    input_csv = f"../datasets/{dataset_name}.csv"
+    input_csv = f"../../../../../../storage_10tb/workspace_garofalo/test_small/datasets/{dataset_name}.csv"
 
     if not os.path.exists(input_csv):
         print(f"Error: Dataset file '{input_csv}' not found.")
@@ -347,7 +380,7 @@ def update_range_query_file_label(index, rotated_dataset_name, minX, minY, maxX,
     original_row = df_range_query.iloc[index]
     
     # List of potential last column names
-    potential_last_columns = ['cardinality_class', 'mbrTests', 'elapsedTime']
+    potential_last_columns = ['cardinality_class', 'mbrTests_class', 'elapsedTime_class']
 
     # Find the actual last column name that exists in original_row
     last_column_name = next((col for col in potential_last_columns if col in original_row), None)
@@ -386,6 +419,8 @@ def update_range_query_param(index, new_dataset_name, cardinality):
     # Retrieve the row at the specified index
     original_row = df_range_query.iloc[index]
 
+    #print(original_row)
+
     # Create a new DataFrame with the new dataset information
     new_row = {
         'datasetName': new_dataset_name,
@@ -402,6 +437,8 @@ def update_range_query_param(index, new_dataset_name, cardinality):
         'cardinality_class': original_row['cardinality_class']
     }
 
+    print(new_row)
+
     # Concatenate the new row with the existing DataFrame
     df_range_query = pd.concat([df_range_query, pd.DataFrame([new_row])], ignore_index=True)
 
@@ -416,7 +453,7 @@ def update_range_query_param2(index, new_dataset_name, cardinality, label):
     original_row = df_range_query.iloc[index]
 
     # List of potential last column names
-    potential_last_columns = ['cardinality_class', 'mbrTests', 'elapsedTime']
+    potential_last_columns = ['cardinality_class', 'mbrTests_class', 'elapsedTime_class']
 
     # Find the actual last column name that exists in original_row
     last_column_name = next((col for col in potential_last_columns if col in original_row), None)
@@ -440,6 +477,8 @@ def update_range_query_param2(index, new_dataset_name, cardinality, label):
         'mbrTests': original_row['mbrTests'],
         last_column_name: label 
     }
+
+    print(new_row)
 
     # Concatenate the new row with the existing DataFrame
     df_range_query = pd.concat([df_range_query, pd.DataFrame([new_row])], ignore_index=True)
@@ -547,6 +586,7 @@ def main():
     bins, labels = create_intervals(min_val, max_val, intervals)
     
     main_data = pd.read_csv('rq_result_ts.csv', delimiter=';')
+    #main_data = main_data[main_data['datasetName'].str.len() == 12]
     summary_data = pd.read_csv('dataset-summaries_ts.csv', delimiter=';')
     
     # Check if 'distribution' column is already present
@@ -581,29 +621,38 @@ def main():
         
         
     inputs = []
-    print("\nEnter your queries in the format 'bin_num num_queries distribution augmentation_technique1 [augmentation_technique2] [augmentation_technique3]'. Type 'end' to finish.")
-    while True:
-        user_input = input("Input: ")
-        if user_input.lower() == 'end':
-            break
-        try:
-            validated_input = validate_input(user_input)
-            inputs.append(validated_input)
-        except ValueError as e:
-            print(f"Invalid input: {e}")
+    file_path = 'input.txt'
+
+    try:
+        with open(file_path, 'r') as file:
+            for line in file:
+                user_input = line.strip()
+
+                if user_input.lower() == 'end':
+                    break
+
+                try:
+                    validated_input = validate_input(user_input)
+                    inputs.append(validated_input)
+                except ValueError as e:
+                    print(f"Invalid input: {e}")
+    except FileNotFoundError:
+        print(f"File {file_path} not found.")
 
     print("\nProcessing user inputs:")
     for bin_num, num_queries, distribution, augmentation_techniques in inputs:
         bin_index = int(bin_num[3:])
         bin_label = labels[bin_index]
-        bin_data = main_data[main_data[f'{param_to_categorize}_class'] == bin_label]
-        dist_data = bin_data[bin_data['distribution'] == distribution]
+        bin_data = main_data[(main_data[f'{param_to_categorize}_class'] == bin_label) & (main_data['datasetName'].str.len() == 12)]
+        dist_data_in = main_data[(main_data[f'{param_to_categorize}_class'] == bin_label) & (main_data['distribution'] == distribution)]
+        dist_data = main_data[ (main_data[f'{param_to_categorize}_class'] == bin_label) &  (main_data['datasetName'].str.len() == 12) &  (main_data['distribution'] == distribution)]
 
-        if not dist_data.empty:
-            if len(dist_data) > num_queries:
+
+        if not dist_data_in.empty:
+            if len(dist_data_in) > num_queries:
                 # Case 1: More than required queries
-                to_keep = dist_data.head(num_queries)
-                to_remove = dist_data.tail(len(dist_data) - num_queries)
+                to_keep = dist_data_in.head(num_queries)
+                to_remove = dist_data_in.tail(len(dist_data_in) - num_queries)
                 main_data = main_data.drop(to_remove.index)
 
                 # Remove datasets only if they are not used in other queries
@@ -617,7 +666,7 @@ def main():
                 # Save the modified data back to the CSV files
                 main_data.to_csv('rq_result_ts.csv', index=False, sep=';')
                 summary_data.to_csv('dataset-summaries_ts.csv', index=False, sep=';')
-            elif len(dist_data) < num_queries:
+            elif len(dist_data_in) < num_queries:
                 # Case 2: Less than required queries
                 print(f"Bin {bin_index} needs augmentation to reach {num_queries} queries with distribution {distribution}. Techniques: {augmentation_techniques}")
                 with open('new_datasets.csv', 'w') as file:
@@ -627,7 +676,7 @@ def main():
                 distribution_name = dist_data['distribution'].iloc[0]
 
                 # Get count of the specific distribution
-                named_distribution_count = bin_data[bin_data['distribution'] == distribution].shape[0]
+                named_distribution_count = dist_data_in[dist_data_in['distribution'] == distribution].shape[0]
 
                 # Calculate the number of additional queries needed
                 num_queries = num_queries - named_distribution_count
@@ -640,9 +689,12 @@ def main():
                 
                 
                 while True:
+
+                    remaining = num_queries - num_queries_inserted
+                    print(f"Da generare: {remaining}")
                 
                     # Define the folder name and the output file name
-                    folder_name = "datasets_augmentation"
+                    folder_name = "../../../../../../storage_10tb/workspace_garofalo/test_small/datasets_augmentation3"
 
                     # Create the folder if it does not exist
                     if not os.path.exists(folder_name):
@@ -653,19 +705,22 @@ def main():
                     file_index = row.name
                     dataset_name = row['datasetName']
                     
-                                       
+                    probabilities = {
+                            "rotation": 0.4,  # 40% chance
+                            "noise": 0.4,    # 40% chance
+                            "merge": 0.2,    # 20% chance
+                        }
+                    
+                    """
                     if param_to_categorize == "cardinality":
-                        element_to_pop = "merge"  
-
-                        for i in range(3, len(augmentation_techniques)):
-                          if augmentation_techniques[i] == element_to_pop:
-                            element = augmentation_techniques.pop(i)
-                            break  # Exit the loop after finding the element
-                        
-                    chosen_technique = random.choice(augmentation_techniques)
-                    print("AEEE") 
-                    print(chosen_technique)
-                    print("AEEE")                    
+                        # Adjust probabilities if needed
+                        probabilities["merge"] = 0  # 0% chance for merge if categorizing by cardinality
+                        probabilities["rotation"] = 0.60
+                        probabilities["noise"] = 0.40
+                    """
+    
+                    chosen_technique = random.choices(list(probabilities.keys()), weights=list(probabilities.values()))[0]
+                    print(chosen_technique)              
                     
                     # Depending on the chosen technique, execute the corresponding code block
                     if chosen_technique == 'rotation':
@@ -674,7 +729,7 @@ def main():
 
                             # Formatting output degree
                             degree_str = str(degree).replace('.', '_')
-                            output_ds = f"datasets_augmentation/{dataset_name}_rotated_{degree_str}.csv"
+                            output_ds = f"../../../../../../storage_10tb/workspace_garofalo/test_small/datasets_augmentation3/{dataset_name}_rotated_{degree_str}.csv"
                             rotated_dataset_name = f"{dataset_name}_rotated_{degree_str}"
 
                             if os.path.exists(output_ds): # No rotation required 
@@ -688,6 +743,11 @@ def main():
 
                                 # Get number of features from dataset summaries file
                                 nf = get_features('dataset-summaries_ts.csv', dataset_name)
+                                
+                                print("Value of nf:", nf)
+                                print("Value of nrem:", nrem)
+
+                                res = float(nf) - float(nrem)
 
                                 res = float(nf) - float(nrem)
                                 print(f"Figures removed: '{nrem}'")
@@ -725,36 +785,76 @@ def main():
                             # Fetch a row with the same distribution but different cardinality_class and selected_cardinality != 0.0
                             if param_to_categorize == "cardinality": 
                                 noise_data = main_data[
-                                    (main_data['distribution'] == distribution) & 
-                                    (main_data['cardinality_class'] != bin_label) & 
+                                    (main_data['distribution'] == distribution) &  
                                     (main_data['cardinality'] != 0.0) &
+                                    (main_data['cardinality_class'] != bin_label) &
                                     (main_data['datasetName'].str.len() == 12)
-                                ]                        
+                                    
+                                ]
+                                # Sorting the DataFrame by 'cardinality' column in ascending order
+                                noise_data = noise_data.sort_values(by='cardinality', ascending=True)
+                                    
+                                # Calculate the lower and upper bounds
+                                lower_bound, upper_bound = map(float, bin_label.split('-'))
+
+                                # Calculate the absolute differences between cardinality and bounds
+                                noise_data['lower_diff'] = abs(noise_data['cardinality'] - lower_bound)
+                                noise_data['upper_diff'] = abs(noise_data['cardinality'] - upper_bound)
+
+                                # Combine the differences to find the overall difference
+                                noise_data['total_diff'] = noise_data[['lower_diff', 'upper_diff']].sum(axis=1)
+
+                                # Sort the DataFrame by the minimum difference (either lower or upper) in ascending order
+                                noise_data['min_diff'] = noise_data[['lower_diff', 'upper_diff']].min(axis=1)
+                                noise_data = noise_data.sort_values(by='min_diff')
+
+                                # Select a random row from the top of the sorted DataFrame
+                                selected_row = noise_data.iloc[0] 
+
+                                              
                             else:
+                                # Define the potential columns to check
+                                columns_to_check = ['cardinality_class', 'mbrTests_class', 'elapsedTime_class']
+                                
+                                existing_column = None
+                                for column in columns_to_check:
+                                    if column in main_data.columns:
+                                        existing_column = column
+                                        break
+
+                                # If no column is found, raise an error or handle it accordingly
+                                if existing_column is None:
+                                    raise ValueError("None of the specified columns exist in the DataFrame.")
+
+                                # Filter the DataFrame using the detected column
                                 noise_data = main_data[
                                     (main_data['distribution'] == distribution) &
-                                    (main_data['cardinality'] != 0.0) & 
+                                    (main_data[existing_column] == bin_label) &
                                     (main_data['datasetName'].str.len() == 12)
                                 ]
+                                
+                                print(noise_data)
+                                
+                                selected_row = noise_data.sample(n=1).iloc[0]
                             
                 
                             if not noise_data.empty:
-                                selected_row = noise_data.sample(n=1).iloc[0]
                                 file_index = selected_row.name
                                 selected_cardinality = selected_row['cardinality']
+                                print(selected_cardinality)
                                 
 
                                 # Extract the datasetName correctly
                                 dataset_name = selected_row['datasetName']
                                 # Load the CSV file into a DataFrame
-                                file_path = f"../index/{dataset_name}_spatial_index/_master.rsgrove"  
+                                file_path = f"../../../../../../storage_10tb/workspace_garofalo/test_small/index/{dataset_name}_spatial_index/_master.rsgrove"  
                                 while True:
                                     try:
                                         df = pd.read_csv(file_path)
                                         break  # If the file is successfully loaded, exit the loop
                                     except FileNotFoundError:
                                         # If the file is not found, try another name
-                                        file_path = f"../index/{dataset_name}_spatial_index/_master.cells"
+                                        file_path = f"../../../../../../storage_10tb/workspace_garofalo/test_small/index/{dataset_name}_spatial_index/_master.cells"
                                         if not os.path.exists(file_path):
                                             # If the alternative file path doesn't exist, break the loop
                                             print("File not found. Exiting.")
@@ -773,11 +873,11 @@ def main():
                                 
                                 disjoint_df = coordinates_df[coordinates_df.apply(are_disjoint2, axis=1, args=(minX, minY, maxX, maxY))]
                                 
-                                input_dataset = f"../datasets/{dataset_name}.csv"
+                                input_dataset = f"../../../../../../storage_10tb/workspace_garofalo/test_small/datasets/{dataset_name}.csv"
                                 
                                 max_index = 0  # Initialize max_index
 
-                                for file_name_d in os.listdir("datasets_augmentation"):
+                                for file_name_d in os.listdir("../../../../../../storage_10tb/workspace_garofalo/test_small/datasets_augmentation3"):
                                     if file_name_d.startswith(selected_row['datasetName']):
                                         try:
                                             index = int(file_name_d.split("_noise_")[-1].split(".")[0])
@@ -790,20 +890,18 @@ def main():
                                 # Read content from input file
                                 with open(input_dataset, 'r') as input_file:
                                     content = input_file.read()
-                                output_path = os.path.join(folder_name, output_dataset)
+                                output_path = os.path.join("../../../../../../storage_10tb/workspace_garofalo/test_small/datasets_augmentation3", output_dataset)
                                 # Write content to output file
                                 with open(output_path, 'w') as output_file:
                                     output_file.write(content)
                                 
                                 print(output_path)   
-                                    
-                                                        
+                                               
                                 if param_to_categorize == "cardinality":
                                     if selected_cardinality > bin_data['cardinality'].iloc[0]:
                                         operation = "decrease"
                                     else:
                                         operation = "increase"
-                                
                                 b, h, num_features = get_dataset_info('dataset-summaries_ts.csv', dataset_name)
                                 
                                 
@@ -825,36 +923,99 @@ def main():
                                         bin_label = row['cardinality_class']
                                         print("Bin Label:", bin_label)
                                         lower_bound, upper_bound = bin_label.split('-')
+                                        delta = random.uniform(0, float(upper_bound)-float(lower_bound))
+                                        
+                                        print(delta)
+
+                                        if(float(upper_bound) == 0.7):
+                                            delta = random.uniform(0, 0.15)
+
                                         
                                         
                                         
                                         if operation == "decrease":
+                                            bound = float(upper_bound) - float(delta)
+                                            print(f"BOUND: {bound}")
+                                            print(f"UB: {float(upper_bound)}")
                                             count_geom_tot = count_lines_efficient(output_path)
-            
-                                            count_inside = count_geom_tot * selected_cardinality      
-                                            while float(selected_cardinality) > float(upper_bound):
-                                                random_row_df = disjoint_df.sample(n=1) 
-                                                new_box = generate_random_box(random_row_df, b, h)
-                                                with open(output_path, 'r+') as file:
-                                                    file.write(','.join(map(str, new_box)) + '\n')
-                                                count_geom_tot += 1
+                                            count = count_geom_tot
+                                            
+                                            count_inside = count_geom_tot * selected_cardinality
+                                            while float(selected_cardinality) > bound:
+                                                if not disjoint_df.empty:
+                                                    random_row_df = disjoint_df.sample(n=1)
+                                                    new_box = generate_random_box(random_row_df, b, h)
+                                                    if new_box != 0:
+                                                        with open(output_path, 'a') as file:  # 'a' mode to append to the file
+                                                            file.write(','.join(map(str, new_box)) + '\n')
+                                                        count_geom_tot += 1
+                                                else:
+                                                        count_geom_tot += 1
+
+                                                
                                                 selected_cardinality = count_inside / count_geom_tot
-                                                print(f"{selected_cardinality},{count_geom_tot}") 
+                                                #print(f"{selected_cardinality},{count_geom_tot}")
+                                            if disjoint_df.empty:
+                                                print(f"Devo agire sulla sel {selected_cardinality}") 
+                                                num_boxes = count_geom_tot - count
+                                                generate_boxes_and_write(output_path, coordinates_summary, b, h, coordinates_rq, num_boxes)
                                             print(f"{selected_cardinality},{count_geom_tot}")
 
                                         else:  # increase
-                                            with open(output_path, 'r+') as file:
-                                                count_geom_tot = count_lines_efficient(output_path)
-                                                count_inside = count_geom_tot * selected_cardinality
+                                            bound = float(lower_bound) + delta
+                                            # Read the file into a DataFrame
+                                            with open(output_path, 'r') as file:
+                                                lines = file.readlines()
 
-                                                while float(selected_cardinality) < float(lower_bound):
-                                                    random_row_df = disjoint_df.sample(n=1)
-                                                    remove_geometry(file, coordinates_rq)
+                                            count_geom_tot = len(lines)
+                                            count_inside = count_geom_tot * selected_cardinality
+                                            checked_lines = set()
+                                            removed_lines = set()
+                                            temp = selected_cardinality
+
+                                            while float(selected_cardinality) < bound:
+                                                line_index = random.randint(0, count_geom_tot - 1)
+
+                                                if line_index in checked_lines:
+                                                    continue
+
+                                                checked_lines.add(line_index)
+                                                removed_geometry = lines[line_index]
+
+                                                xmin, ymin, xmax, ymax = map(float, removed_geometry.strip().split(','))
+
+                                                if (xmax <= coordinates_rq[0] or xmin >= coordinates_rq[2] or
+                                                    ymax <= coordinates_rq[1] or ymin >= coordinates_rq[3]):
+                                                    removed_lines.add(line_index)
                                                     count_geom_tot -= 1
-                                                    selected_cardinality = count_inside / count_geom_tot
-                                                    print(f"{selected_cardinality},{count_geom_tot}")
-                                            print(f"{selected_cardinality},{count_geom_tot}")
 
+                                                selected_cardinality = count_inside / count_geom_tot
+                                                #print(f"{selected_cardinality},{count_geom_tot}")
+
+                                                if len(checked_lines) >= count_geom_tot:
+                                                    break
+                                                
+                                                
+                                                
+                                                # Using a generator to write lines in chunks
+                                                def filtered_lines():
+                                                    for i, line in enumerate(lines):
+                                                        if i not in removed_lines:
+                                                            yield line
+                                            
+                                            # Writing the file in chunks
+                                            chunk_size = 1024  # Adjust the chunk size as needed
+                                            with open(output_path, 'w') as file:
+                                                buffer = []
+                                                for line in filtered_lines():
+                                                    buffer.append(line)
+                                                    if len(buffer) >= chunk_size:
+                                                        file.writelines(buffer)
+                                                        buffer = []
+                                                if buffer:
+                                                    file.writelines(buffer)
+
+                                            print(f"Final: {selected_cardinality},{count_geom_tot}")
                                     else:
                                         ops = ["increase", "decrease"]
                                         operation = random.choice(ops)
@@ -866,39 +1027,73 @@ def main():
                                         
                                         if operation == "decrease":
                                             count_geom_tot = count_lines_efficient(output_path)
-            
-                                            count_inside = count_geom_tot * selected_cardinality      
+                                            count_inside = count_geom_tot * selected_cardinality
+
                                             while number > 0:
-                                                random_row_df = disjoint_df.sample(n=1) 
-                                                new_box = generate_random_box(random_row_df, b, h)
-                                                with open(output_path, 'r+') as file:
-                                                    file.write(','.join(map(str, new_box)) + '\n')
-                                                count_geom_tot += 1
-                                                selected_cardinality = count_inside / count_geom_tot 
-                                                number = number - 1
-                                                print(f"{selected_cardinality},{count_geom_tot}, {number}")
+                                                if not disjoint_df.empty:
+                                                    random_row_df = disjoint_df.sample(n=1)
+                                                    new_box = generate_random_box(random_row_df, b, h)
+                                                    
+                                                    if new_box != 0:
+                                                        with open(output_path, 'a') as file:  # 'a' mode to append to the file
+                                                            file.write(','.join(map(str, new_box)) + '\n')
+                                                        count_geom_tot += 1
+                                                        number -= 1
+                                                else:
+                                                    # Handle the case when disjoint_df is empty
+                                                    print(f"Disjoint DataFrame is empty. Generating boxes based on other criteria.")
+                                                    num_boxes = count_geom_tot - count
+                                                    generate_boxes_and_write(output_path, coordinates_summary, b, h, coordinates_rq, num_boxes)
+                                                    count_geom_tot += num_boxes
+                                                    number = 0  # Exit the loop since we handled the empty case
+
+                                                selected_cardinality = count_inside / count_geom_tot
+
                                             print(f"{selected_cardinality},{count_geom_tot}")
+
 
                                         else:  # increase
                                             count_geom_tot = count_lines_efficient(output_path)
-                                            count_inside = count_geom_tot * selected_cardinality      
+                                            count_inside = count_geom_tot * selected_cardinality
+
+                                            with open(output_path, 'r') as file:
+                                                lines = file.readlines()
+
+                                            checked_lines = set()
 
                                             while number > 0:
-                                                with open(output_path, 'r+') as file:
-                                                    random_row_df = disjoint_df.sample(n=1)
-                                                    remove_geometry(file, coordinates_rq)
+                                                if count_geom_tot == 0:
+                                                    break
+
+                                                line_index = random.randint(0, count_geom_tot - 1)
+                                                if line_index in checked_lines:
+                                                    continue
+
+                                                checked_lines.add(line_index)
+                                                removed_geometry = lines[line_index]
+                                                xmin, ymin, xmax, ymax = map(float, removed_geometry.strip().split(','))
+
+                                                if xmax <= coordinates_rq[0] or xmin >= coordinates_rq[2] or ymax <= coordinates_rq[1] or ymin >= coordinates_rq[3]:
+                                                    # Remove the line from the list
+                                                    lines.pop(line_index)
                                                     count_geom_tot -= 1
-                                                    selected_cardinality = count_inside / count_geom_tot
                                                     number -= 1
-                                                    print(f"{selected_cardinality},{count_geom_tot}, {number}")
+
+                                                selected_cardinality = count_inside / count_geom_tot
+
+                                            # Rewrite the file with the remaining lines once
+                                            with open(output_path, 'w') as file:
+                                                file.writelines(lines)
+
                                             print(f"{selected_cardinality},{count_geom_tot}")
+
                                         
                                     new_dataset_name = str(output_dataset).replace('.csv', '')
                                     
                                     
                                     update_dataset_param(dataset_name, new_dataset_name, count_geom_tot)
                                     if param_to_categorize == "cardinality":
-                                        update_range_query_param(file_index, new_dataset_name, selected_cardinality)
+                                        update_range_query_param2(file_index, new_dataset_name, selected_cardinality, bin_label)
                                     else:
                                         update_range_query_param2(file_index, new_dataset_name, selected_cardinality, bin_label)
                                 except subprocess.CalledProcessError as e:
@@ -907,7 +1102,11 @@ def main():
                             else:
                                 print("No appropriate noise data found.")
                         except Exception as e:
-                            print(f"An error occurred: {e}")    
+                            print(f"An error occurred: {e}")
+                            if os.path.exists(output_path):
+                                os.remove(output_path)
+                                print(f"Removed file at {output_path} due to error.")
+                                                
                             num_queries_inserted -= 1
                     
                     elif chosen_technique == 'merge':
@@ -916,6 +1115,9 @@ def main():
                             print("Collecting data")
                             # Code block for merge augmentation
                             merge_data = main_data
+                            
+                            # Filter datasetName with length == 12
+                            merge_data = merge_data[merge_data['datasetName'].str.len() == 12]
                         
                             # Group by 'datasetName'
                             grouped = merge_data.groupby('datasetName')
@@ -928,9 +1130,11 @@ def main():
                                 raise ValueError("Not enough unique dataset names to sample from.")
                                 
                             print("Fetching datasets...")
+                            tent = 0
 
                             while True:
                                 while True:
+                                    
                                     # Select 2 random rows with different 'datasetName'
                                     random_rows = sampled_groups.sample(n=2, replace=False)
 
@@ -948,6 +1152,11 @@ def main():
                                         print("Disjoint found")
                                         break
                         
+                                if tent == 20:
+                                        print("Proceeding with another tec")
+                                        num_queries_inserted -=1
+                                        break
+
                                 # Dataset merge
                                 name_d1 = summary_data_rows.iloc[0]['datasetName']
                                 name_d2 = summary_data_rows.iloc[1]['datasetName']
@@ -990,37 +1199,56 @@ def main():
                                         break
                                     else:
                                         print("New cardinality was not in the bin. Nuovo tentativo in corso...")
-                                        continue
-                        
+                                        print(f"Tentativo: {tent}")
+                                        tent = tent +1
+                                        continue                       
                                 else: 
                                     break     
                         
-                            print("Combination found, proceding to merge")
-                            # Updating stuff
-                            # Load dataset1.csv and dataset2.csv 
-                            in1 = f"../datasets/{name_d1}.csv"
-                            in2 = f"../datasets/{name_d2}.csv"
-                            dataset1 = pd.read_csv(in1)
-                            dataset2 = pd.read_csv(in2)
-                    
-                            # Extract numbers from dataset names
-                            n1, n2 = extract_numbers(name_d1), extract_numbers(name_d2)
+                            if tent < 20:
+                                print("Combination found, proceding to merge (some time required)")
+                                # Updating stuff
+                                # Load dataset1.csv and dataset2.csv 
+                                in1 = f"../../../../../../storage_10tb/workspace_garofalo/test_small/datasets/{name_d1}.csv"
+                                in2 = f"../../../../../../storage_10tb/workspace_garofalo/test_small/datasets/{name_d2}.csv"
+                                
+                                # Load dataset1.csv and dataset2.csv
+                                print("Reading dataset1...")
+                                dataset1 = pd.read_csv(in1, sep=',', header=None)
+                                print(dataset1.head())  
+                                
+                                print("Reading dataset2...")
+                                dataset2 = pd.read_csv(in2, sep=',', header=None)
+                                print(dataset2.head())
 
-                            # Compose the combined dataset filename
-                            combined_filename = f"{folder_name}/dataset_{n1[0]}_{n2[0]}_combined.csv"
-                            comb = f"dataset_{n1[0]}_{n2[0]}_combined"
+                        
+                                # Extract numbers from dataset names
+                                n1, n2 = extract_numbers(name_d1), extract_numbers(name_d2)
 
-                            # Concatenate the two datasets
-                            combined_dataset = pd.concat([dataset1, dataset2], ignore_index=True)
+                                # Compose the combined dataset filename
+                                combined_filename = f"{folder_name}/dataset_{n1[0]}_{n2[0]}_combined.csv"
+                                comb = f"dataset_{n1[0]}_{n2[0]}_combined"
+                                
+                                print("Appending dataset...")
 
-                            # Write the combined dataset to a new file
-                            combined_dataset.to_csv(combined_filename, index=False, header=True)
-                    
-                            update_dataset_param(random_row['datasetName'], comb, sum_nf)
-                            if param_to_categorize == "cardinality":
-                                update_range_query_param(file_index, comb, card)
-                            else:
-                                update_range_query_param2(file_index, comb, new_card, bin_label)
+                                # Concatenate the two datasets
+                                # combined_dataset = dataset1.append(dataset2, ignore_index=True)
+
+                                # Concatenate the two datasets
+                                combined_dataset = pd.concat([dataset1, dataset2], ignore_index=True)
+
+                                # Write the combined dataset to a new file without spaces around commas
+                                combined_dataset.to_csv(combined_filename, index=False, header=False)
+                                
+                                print("Updating stuff...")
+                                
+                                update_dataset_param(random_row['datasetName'], comb, sum_nf)
+                                if param_to_categorize == "cardinality":
+                                    update_range_query_param(file_index, comb, new_card)
+                                else:
+                                    update_range_query_param2(file_index, comb, new_card, bin_label)
+                                
+                                print("Merge completed.")
                             
                         except Exception as e:
                             print(f"An error occurred: {e}")
@@ -1028,6 +1256,8 @@ def main():
                     
                     # Increment the count of new queries inserted
                     num_queries_inserted += 1
+                    
+                    print(f"Siamo al {num_queries_inserted} giro")
                     
                     # Check if all rows have been processed
                     if num_queries_inserted >= num_queries:
@@ -1038,7 +1268,7 @@ def main():
             remove_distribution_column("rq_result_ts.csv")
             print(f"Augmented queries with {augmentation_techniques} techniques.")
 
-        elif len(dist_data) == num_queries:
+        elif len(dist_data_in) == num_queries:
             print(f"Bin {bin_index} already has {num_queries} queries with distribution {distribution}")
         else:
             # Case 3: No queries with the specified distribution
